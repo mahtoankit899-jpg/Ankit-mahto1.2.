@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>OTP Sender (Frontend + Backend Code)</title>
+  <style>
+    body {
+      margin: 0;
+      font-family: Arial, sans-serif;
+      background: linear-gradient(270deg, #ff6a00, #ee0979, #00c6ff, #0072ff);
+      background-size: 800% 800%;
+      animation: gradientShift 15s ease infinite;
+      min-height: 100vh;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+    }
+    @keyframes gradientShift {
+      0% {background-position: 0% 50%;}
+      50% {background-position: 100% 50%;}
+      100% {background-position: 0% 50%;}
+    }
+    .container {
+      width: 600px;
+      background: rgba(255,255,255,0.95);
+      padding: 20px;
+      border-radius: 12px;
+      box-shadow: 0 6px 20px rgba(0,0,0,0.3);
+    }
+    h2 { text-align: center; margin-bottom: 15px; }
+    label { display:block; margin-top:10px; }
+    input, select {
+      width: 100%;
+      padding: 8px;
+      margin-top: 5px;
+      border: 1px solid #ccc;
+      border-radius: 6px;
+    }
+    button {
+      margin-top: 12px;
+      padding: 10px 20px;
+      border: none;
+      border-radius: 6px;
+      cursor: pointer;
+      background: #007bff;
+      color: #fff;
+      font-weight: bold;
+    }
+    button:hover { background: #0056b3; }
+    #response {
+      margin-top: 15px;
+      padding: 10px;
+      border-radius: 8px;
+      background: #f7f7f7;
+      font-family: monospace;
+      white-space: pre-wrap;
+    }
+    table {
+      margin-top: 20px;
+      width: 100%;
+      border-collapse: collapse;
+    }
+    th, td {
+      border: 1px solid #ccc;
+      padding: 8px;
+      text-align: center;
+    }
+    th { background: #007bff; color: #fff; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h2>📩 OTP Sender</h2>
+    <form id="otpForm">
+      <label>Country Code</label>
+      <input id="country_code" value="91" required />
+
+      <label>Phone Number</label>
+      <input id="phone_number" placeholder="9876543210" required />
+
+      <label>Persona Type</label>
+      <select id="persona_type">
+        <option value="user">User</option>
+        <option value="admin">Admin</option>
+      </select>
+
+      <button type="submit">Send OTP</button>
+    </form>
+
+    <div style="margin-top:15px;">
+      <label>Enter OTP to Verify</label>
+      <input id="verify_otp" placeholder="123456" />
+      <button id="verifyBtn">Verify OTP</button>
+    </div>
+
+    <div id="response"></div>
+
+    <table id="historyTable">
+      <thead>
+        <tr><th>#</th><th>Number</th><th>Status</th><th>Time</th></tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+  </div>
+
+  <script>
+    const backend = "http://localhost:3000"; // apna backend yaha chalana hai
+    let historyCount = 0;
+
+    // Send OTP
+    document.getElementById("otpForm").addEventListener("submit", async e => {
+      e.preventDefault();
+      const payload = {
+        country_code: document.getElementById("country_code").value,
+        phone_number: document.getElementById("phone_number").value,
+        persona_type: document.getElementById("persona_type").value
+      };
+      try {
+        const resp = await fetch(backend + "/send-otp", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload)
+        });
+        const data = await resp.json();
+        document.getElementById("response").innerText =
+          "✅ OTP request sent\n\n" + JSON.stringify(data, null, 2);
+
+        historyCount++;
+        const row = `<tr>
+          <td>${historyCount}</td>
+          <td>${payload.phone_number}</td>
+          <td>${data.success ? "✅ Sent" : "❌ Failed"}</td>
+          <td>${new Date().toLocaleTimeString()}</td>
+        </tr>`;
+        document.querySelector("#historyTable tbody").insertAdjacentHTML("beforeend", row);
+      } catch (err) {
+        document.getElementById("response").innerText = "❌ Error: " + err.message;
+      }
+    });
+
+    // Verify OTP
+    document.getElementById("verifyBtn").addEventListener("click", async () => {
+      const payload = {
+        country_code: document.getElementById("country_code").value,
+        phone_number: document.getElementById("phone_number").value,
+        otp: document.getElementById("verify_otp").value.trim()
+      };
+      try {
+        const resp = await fetch(backend + "/verify-otp", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload)
+        });
+        const data = await resp.json();
+        document.getElementById("response").innerText =
+          "🔎 Verify Response\n\n" + JSON.stringify(data, null, 2);
+      } catch (err) {
+        document.getElementById("response").innerText = "❌ Error: " + err.message;
+      }
+    });
+  </script>
+
+  <!-- ==================== BACKEND CODE ==================== -->
+  <!--
+  Save the below part as server.js and run with Node.js
+  Install deps: npm install express body-parser twilio dotenv
+  -----------------------------------------------------------
+
+  import express from "express";
+  import bodyParser from "body-parser";
+  import twilio from "twilio";
+  import dotenv from "dotenv";
+
+  dotenv.config();
+  const app = express();
+  app.use(bodyParser.json());
+
+  const client = twilio(process.env.TWILIO_SID, process.env.TWILIO_AUTH);
+  const otpStore = new Map();
+
+  app.post("/send-otp", async (req, res) => {
+    const { country_code, phone_number } = req.body;
+    const otp = Math.floor(100000 + Math.random() * 900000).toString();
+    const fullNumber = `+${country_code}${phone_number}`;
+    otpStore.set(fullNumber, otp);
+
+    try {
+      await client.messages.create({
+        body: `Your OTP is: ${otp}`,
+        from: process.env.TWILIO_FROM,
+        to: fullNumber
+      });
+      res.json({ success: true, message: "OTP sent successfully" });
+    } catch (err) {
+      res.json({ success: false, error: err.message });
+    }
+  });
+
+  app.post("/verify-otp", (req, res) => {
+    const { country_code, phone_number, otp } = req.body;
+    const fullNumber = `+${country_code}${phone_number}`;
+    if (otpStore.get(fullNumber) === otp) {
+      otpStore.delete(fullNumber);
+      return res.json({ success: true, message: "OTP verified" });
+    }
+    res.json({ success: false, message: "Invalid OTP" });
+  });
+
+  app.listen(3000, () => console.log("✅ Server running on http://localhost:3000"));
+
+  -----------------------------------------------------------
+  .env file example:
+  TWILIO_SID=ACxxxxxxxxxxxxxxxxxxxxx
+  TWILIO_AUTH=your_auth_token
+  TWILIO_FROM=+1234567890
+  -->
+</body>
+</html>
